@@ -61,7 +61,7 @@ struct overlay_frame {
   
   // callback and context just before packet sending
   void *send_context;
-  int (*send_hook)(struct overlay_frame *, int seq, void *context);
+  int (*send_hook)(struct overlay_frame *, struct network_destination *, int, void *);
   
   // when should we send it?
   time_ms_t delay_until;
@@ -112,6 +112,8 @@ struct internal_mdp_header{
   uint8_t qos;
   uint8_t crypt_flags; // combination of MDP_FLAG_NO_CRYPT & MDP_FLAG_NO_SIGN flags
   struct overlay_interface *receive_interface;
+  void *send_context;
+  int (*send_hook)(struct overlay_frame *, struct network_destination *, int, void *);
 };
 
 

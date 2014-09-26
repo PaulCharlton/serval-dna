@@ -156,6 +156,8 @@ overlay_mdp_service_probe(struct internal_mdp_header *header, struct overlay_buf
     WARN("Probe packets should be returned from remote echo port");
     RETURN(-1);
   }
+  if (config.debug.overlayrouting)
+    DEBUGF("Received probe response from %s", alloca_tohex_sid_t(header->source->sid));
   
   if (header->source->reachable == REACHABLE_SELF)
     RETURN(0);
@@ -165,7 +167,7 @@ overlay_mdp_service_probe(struct internal_mdp_header *header, struct overlay_buf
   addr.addrlen = ob_remaining(payload);
   
   if (addr.addrlen > sizeof(addr.store))
-    RETURN(-1);
+    RETURN(WHY("Badly formatted probe packet"));
   
   ob_get_bytes(payload, (unsigned char*)&addr.addr, addr.addrlen);
   
@@ -300,10 +302,13 @@ int overlay_mdp_service_stun(struct internal_mdp_header *header, struct overlay_
     if (!subscriber || (subscriber->reachable&REACHABLE_DIRECT))
       continue;
     
-    struct network_destination *destination = create_unicast_destination(&addr, NULL);
-    if (destination){
-      overlay_send_probe(subscriber, destination, OQ_MESH_MANAGEMENT);
-      release_destination_ref(destination);
+    // only trust stun responses from our directory service or about the packet sender.
+    if (directory_service == header->source || subscriber == header->source){
+      struct network_destination *destination = create_unicast_destination(&addr, NULL);
+      if (destination){
+	overlay_send_probe(subscriber, destination, OQ_MESH_MANAGEMENT);
+	release_destination_ref(destination);
+      }
     }
   }
   return 0;

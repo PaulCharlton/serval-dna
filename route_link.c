@@ -812,15 +812,18 @@ static int neighbour_find_best_link(struct neighbour *n)
   return 0;
 }
 
-static int neighbour_link_sent(struct overlay_frame *UNUSED(frame), int sequence, void *context)
+static int neighbour_link_sent(struct overlay_frame *frame, struct network_destination *destination, int sequence, void *context)
 {
+  frame->resend = -1;
   struct subscriber *subscriber = context;
   struct neighbour *neighbour = get_neighbour(subscriber, 0);
   if (!neighbour)
     return 0;
   neighbour->last_update_seq = sequence;
   if ((config.debug.linkstate && config.debug.verbose)||config.debug.ack)
-    DEBUGF("LINK STATE; ack sent to neighbour %s in seq %d", alloca_tohex_sid_t(subscriber->sid), sequence);
+    DEBUGF("LINK STATE; ack sent to neighbour %s via %s, in seq %d", 
+      alloca_tohex_sid_t(subscriber->sid), 
+      alloca_socket_address(&destination->address), sequence);
   return 0;
 }
 
@@ -836,36 +839,23 @@ static int send_neighbour_link(struct neighbour *n)
     send_legacy_self_announce_ack(n, n->best_link, now);
     n->last_update = now;
   } else {
-    struct overlay_frame *frame = emalloc_zero(sizeof(struct overlay_frame));
-    frame->type=OF_TYPE_DATA;
-    frame->source=my_subscriber;
-    frame->ttl=1;
-    frame->queue=OQ_MESH_MANAGEMENT;
-    if ((frame->payload = ob_new()) == NULL) {
-      op_free(frame);
-      RETURN(-1);
-    }
-
-    frame->send_hook = neighbour_link_sent;
-    frame->send_context = n->subscriber;
-    frame->resend=-1;
-
-    if (n->subscriber->reachable & REACHABLE){
-      frame->destination = n->subscriber;
-    }else{
-      // no routing decision yet? send this packet to all probable destinations.
-      if ((config.debug.linkstate && config.debug.verbose)|| config.debug.ack)
-	DEBUGF("Sending link state ack to all possibilities");
-      struct link_out *out = n->out_links;
-      while(out){
-	if (out->timeout >= now)
-	  frame->destinations[frame->destination_count++].destination = add_destination_ref(out->destination);
-	out = out->_next;
-      }
-    }
+    struct internal_mdp_header header;
+    bzero(&header, sizeof header);
     
-    ob_limitsize(frame->payload, 400);
-    overlay_mdp_encode_ports(frame->payload, MDP_PORT_LINKSTATE, MDP_PORT_LINKSTATE);
+    header.source = my_subscriber;
+    header.source_port = MDP_PORT_LINKSTATE;
+    header.destination = n->subscriber;
+    header.destination_port = MDP_PORT_LINKSTATE;
+    header.ttl = 6;
+    header.qos = OQ_MESH_MANAGEMENT;
+    header.send_hook = neighbour_link_sent;
+    header.send_context = n->subscriber;
+    
+    struct overlay_buffer *payload = ob_new();
+    if (!payload)
+      RETURN(-1);
+    
+    ob_limitsize(payload, 400);
 
     char flags=0;
     if (n->best_link->unicast)
@@ -874,12 +864,14 @@ static int send_neighbour_link(struct neighbour *n)
       flags|=FLAG_BROADCAST;
 
     if (config.debug.ack)
-      DEBUGF("LINK STATE; Sending ack to %s for seq %d", alloca_tohex_sid_t(n->subscriber->sid), n->best_link->ack_sequence);
+      DEBUGF("LINK STATE; Sending ack to %s for seq %d", 
+	alloca_tohex_sid_t(n->subscriber->sid), n->best_link->ack_sequence);
     
-    append_link_state(frame->payload, flags, n->subscriber, my_subscriber, n->best_link->neighbour_interface, 1,
+    append_link_state(payload, flags, n->subscriber, my_subscriber, n->best_link->neighbour_interface, 1,
 	              n->best_link->ack_sequence, n->best_link->ack_mask, -1);
-    if (overlay_payload_enqueue(frame) == -1)
-      op_free(frame);
+    ob_flip(payload);
+    overlay_send_frame(&header, payload);
+    ob_free(payload);
 
     n->best_link->ack_counter = ACK_WINDOW;
     n->last_update = now;

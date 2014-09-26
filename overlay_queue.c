@@ -455,7 +455,7 @@ overlay_stuff_packet(struct outgoing_packet *packet, overlay_txqueue *queue, tim
     
     if (frame->send_hook){
       // last minute check if we really want to send this frame, or track when we sent it
-      if (frame->send_hook(frame, packet->seq, frame->send_context)){
+      if (frame->send_hook(frame, packet->destination, packet->seq, frame->send_context)){
         // drop packet
         frame = overlay_queue_remove(queue, frame);
         continue;

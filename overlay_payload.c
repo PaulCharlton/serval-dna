@@ -57,8 +57,10 @@ static int overlay_frame_build_header(int packet_version, struct decode_context 
     overlay_address_append(context, buff, source);
   
   if (flags & PAYLOAD_FLAG_TO_BROADCAST){
-    if (!(flags & PAYLOAD_FLAG_ONE_HOP))
+    if (!(flags & PAYLOAD_FLAG_ONE_HOP)){
+      assert(broadcast);
       overlay_broadcast_append(buff, broadcast);
+    }
   } else {
     overlay_address_append(context, buff, destination);
     if (!(flags & PAYLOAD_FLAG_ONE_HOP))
